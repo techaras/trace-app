@@ -4,18 +4,33 @@ import cv2
 import numpy as np
 from skimage import measure
 import base64
+import os
 
 app = Flask(__name__)
 CORS(app)
 
+# Get API key from environment variable
+API_KEY = os.environ.get('API_KEY', 'your-default-api-key')
+
+def validate_api_key():
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return False
+    token = auth_header.split(' ')[1]
+    return token == API_KEY
+
 @app.route('/trace', methods=['POST'])
 def trace_shapes():
+    # Check API key
+    if not validate_api_key():
+        return jsonify({'error': 'Unauthorized'}), 401
+
     if 'image' not in request.files:
-        return 'No image part in the request', 400
+        return jsonify({'error': 'No image part in the request'}), 400
 
     file = request.files['image']
     if file.filename == '':
-        return 'No image selected for uploading', 400
+        return jsonify({'error': 'No image selected for uploading'}), 400
 
     # Read the image in memory
     filestr = file.read()
