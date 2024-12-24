@@ -172,6 +172,10 @@ def process_image(img):
         'regions': regions,
         'background_base64': background_base64
     }
+    
+@app.route('/')
+def home():
+    return "Flask server is running!"
 
 if __name__ == '__main__':
     app.run()
