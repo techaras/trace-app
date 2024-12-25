@@ -54,75 +54,51 @@ def trace_shapes():
     return jsonify(response)
 
 def process_image(img):
-    """Process image to get edges and segmented regions with memory optimization."""
+    """Process image to get edges and segmented regions with more aggressive edge detection."""
     # Store original image for final output
     original_img = img.copy()
-    
-    # Add size check and downscaling for very large images
-    max_dimension = 2000  # Maximum dimension we'll process
-    scale = 1.0
-    if max(img.shape) > max_dimension:
-        scale = max_dimension / max(img.shape)
-        new_width = int(img.shape[1] * scale)
-        new_height = int(img.shape[0] * scale)
-        img = cv2.resize(img, (new_width, new_height))
     
     # 1. Convert to grayscale
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
-    # 2. Multi-scale edge detection approach with memory-efficient parameters
+    # 2. Multi-scale edge detection approach with more aggressive parameters
+    edges_fine = None
+    edges_normal = None
+    
     # 2a. Fine detail edge detection
-    bilateral_fine = cv2.bilateralFilter(gray, d=3, sigmaColor=5, sigmaSpace=5)
-    edges_fine = cv2.Canny(bilateral_fine, 5, 40)
-    bilateral_fine = None  # Free memory
+    # Reduced bilateral filter parameters for even more detail preservation
+    bilateral_fine = cv2.bilateralFilter(gray, d=3, sigmaColor=5, sigmaSpace=5)  # Reduced sigmaColor and sigmaSpace
+    edges_fine = cv2.Canny(bilateral_fine, 5, 40)  # Lower thresholds for more edge detection
     
     # 2b. Normal edge detection
-    bilateral_normal = cv2.bilateralFilter(gray, d=5, sigmaColor=30, sigmaSpace=30)
-    edges_normal = cv2.Canny(bilateral_normal, 15, 90)
-    bilateral_normal = None  # Free memory
+    bilateral_normal = cv2.bilateralFilter(gray, d=5, sigmaColor=30, sigmaSpace=30)  # Reduced parameters
+    edges_normal = cv2.Canny(bilateral_normal, 15, 90)  # Lower thresholds
     
     # 2c. Combine edge detection results
     edges_combined = cv2.bitwise_or(edges_fine, edges_normal)
-    edges_fine = None  # Free memory
-    edges_normal = None  # Free memory
     
-    # 3. Edge enhancement with smaller kernel
+    # 3. More aggressive edge enhancement
+    # Modified kernel for stronger edge connectivity
     cross_kernel = np.array([
         [1, 1, 1],
         [1, 1, 1],
         [1, 1, 1]
     ], dtype=np.uint8)
     
-    edges_connected = cv2.dilate(edges_combined, cross_kernel, iterations=1)
-    edges_combined = None  # Free memory
+    # Increased iterations for more aggressive dilation
+    edges_connected = cv2.dilate(edges_combined, cross_kernel, iterations=2)
     
     # 4. Create binary mask
     binary = edges_connected > 0
-    edges_connected = None  # Free memory
     
-    # 5. Connected components with size filtering
+    # Rest of the function remains the same
     num_labels, labels = cv2.connectedComponents(
         (1 - binary).astype(np.uint8),
-        connectivity=4  # Use 4-connectivity instead of 8 to reduce complexity
+        connectivity=8
     )
     
-    # Filter out very small components to reduce processing
-    min_component_size = 100
-    for label in range(1, num_labels):
-        component_size = np.sum(labels == label)
-        if component_size < min_component_size:
-            labels[labels == label] = 0
+    segments = np.zeros_like(img)
     
-    # Reassign labels to be consecutive
-    unique_labels = np.unique(labels)
-    label_map = {old_label: new_label for new_label, old_label in enumerate(unique_labels)}
-    new_labels = np.zeros_like(labels)
-    for old_label, new_label in label_map.items():
-        new_labels[labels == old_label] = new_label
-    labels = new_labels
-    num_labels = len(unique_labels)
-    
-    # Generate colors
     colors = []
     for i in range(num_labels):
         hue = int((i / num_labels) * 180)
@@ -133,67 +109,59 @@ def process_image(img):
     colors = np.array(colors)
     colors[0] = [0, 0, 0]  # Background color
     
-    # Create visualization efficiently
     segments_with_edges = np.zeros_like(img)
     for label in range(num_labels):
-        mask = (labels == label)
+        mask = labels == label
+        segments[mask] = colors[label]
         segments_with_edges[mask] = colors[label]
     
     segments_with_edges[binary] = [0, 0, 0]
     
     edge_output = img.copy()
-    edge_output[binary] = [255, 0, 255]
+    edge_output[binary] = [255, 0, 255]  # Magenta edges
     
-    # Process segments more efficiently
+    # Create segment patches
     segment_patches = []
     for label in range(1, num_labels):
-        try:
-            mask = (labels == label)
-            if not np.any(mask):
-                continue
-            
-            # Use numpy operations instead of where()
-            rows = np.any(mask, axis=1)
-            cols = np.any(mask, axis=0)
-            
-            top, bottom = np.where(rows)[0][[0, -1]]
-            left, right = np.where(cols)[0][[0, -1]]
-            
-            # Skip if patch is too large
-            if (bottom - top + 1) * (right - left + 1) > 1000000:  # Skip patches larger than 1M pixels
-                continue
-                
-            patch = original_img[top:bottom+1, left:right+1].copy()
-            patch_mask = mask[top:bottom+1, left:right+1]
-            
-            patch_with_alpha = cv2.cvtColor(patch, cv2.COLOR_BGR2BGRA)
-            edge_mask = binary[top:bottom+1, left:right+1]
-            expanded_mask = patch_mask | edge_mask
-            
-            patch_with_alpha[~expanded_mask] = [0, 0, 0, 0]
-            
-            _, buffer = cv2.imencode('.png', patch_with_alpha)
-            patch_base64 = base64.b64encode(buffer).decode('utf-8')
-            
-            segment_patches.append({
-                'label': int(label),
-                'base64': patch_base64,
-                'position': {
-                    'top': int(top),
-                    'left': int(left),
-                    'width': int(right - left + 1),
-                    'height': int(bottom - top + 1)
-                }
-            })
-        except Exception as e:
-            continue  # Skip problematic segments
+        mask = labels == label
+        if not np.any(mask):
+            continue
+        
+        y_indices, x_indices = np.where(mask)
+        if len(y_indices) == 0 or len(x_indices) == 0:
+            continue
+        
+        top, bottom = np.min(y_indices), np.max(y_indices)
+        left, right = np.min(x_indices), np.max(x_indices)
+        
+        patch = original_img[top:bottom+1, left:right+1].copy()
+        patch_mask = mask[top:bottom+1, left:right+1]
+        
+        patch_with_alpha = cv2.cvtColor(patch, cv2.COLOR_BGR2BGRA)
+        
+        edge_mask = binary[top:bottom+1, left:right+1]
+        expanded_mask = patch_mask | edge_mask
+        
+        patch_with_alpha[~expanded_mask] = [0, 0, 0, 0]
+        
+        _, buffer = cv2.imencode('.png', patch_with_alpha)
+        patch_base64 = base64.b64encode(buffer).decode('utf-8')
+        
+        segment_patches.append({
+            'label': int(label),
+            'base64': patch_base64,
+            'position': {
+                'top': int(top),
+                'left': int(left),
+                'width': int(right - left + 1),
+                'height': int(bottom - top + 1)
+            }
+        })
     
-    # Create background
     background = cv2.cvtColor(original_img, cv2.COLOR_BGR2BGRA)
     _, bg_buffer = cv2.imencode('.png', background)
     background_base64 = base64.b64encode(bg_buffer).decode('utf-8')
     
-    # Calculate regions more efficiently
     props = measure.regionprops(labels)
     regions = []
     min_area = 100
@@ -210,7 +178,7 @@ def process_image(img):
     
     _, edges_buffer = cv2.imencode('.png', edge_output)
     _, segments_buffer = cv2.imencode('.png', segments_with_edges)
-    
+  
     return {
         'edges_base64': base64.b64encode(edges_buffer).decode('utf-8'),
         'segments_base64': base64.b64encode(segments_buffer).decode('utf-8'),
@@ -226,3 +194,4 @@ def home():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
+    
