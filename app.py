@@ -54,44 +54,43 @@ def trace_shapes():
     return jsonify(response)
 
 def process_image(img):
-    """Process image to get edges and segmented regions with more aggressive edge detection."""
+    """Process image to get edges and segmented regions with balanced edge detection."""
     # Store original image for final output
     original_img = img.copy()
     
     # 1. Convert to grayscale
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
-    # 2. Multi-scale edge detection approach with more aggressive parameters
+    # 2. Multi-scale edge detection approach with balanced parameters
     edges_fine = None
     edges_normal = None
     
     # 2a. Fine detail edge detection
-    # Reduced bilateral filter parameters for even more detail preservation
-    bilateral_fine = cv2.bilateralFilter(gray, d=3, sigmaColor=5, sigmaSpace=5)  # Reduced sigmaColor and sigmaSpace
-    edges_fine = cv2.Canny(bilateral_fine, 5, 40)  # Lower thresholds for more edge detection
+    # Slightly increased bilateral filter parameters for more balanced detail preservation
+    bilateral_fine = cv2.bilateralFilter(gray, d=3, sigmaColor=7, sigmaSpace=7)  # Increased from 5 to 7
+    edges_fine = cv2.Canny(bilateral_fine, 8, 45)  # Slightly increased thresholds
     
     # 2b. Normal edge detection
-    bilateral_normal = cv2.bilateralFilter(gray, d=5, sigmaColor=30, sigmaSpace=30)  # Reduced parameters
-    edges_normal = cv2.Canny(bilateral_normal, 15, 90)  # Lower thresholds
+    bilateral_normal = cv2.bilateralFilter(gray, d=5, sigmaColor=35, sigmaSpace=35)  # Increased from 30 to 35
+    edges_normal = cv2.Canny(bilateral_normal, 18, 95)  # Slightly increased thresholds
     
     # 2c. Combine edge detection results
     edges_combined = cv2.bitwise_or(edges_fine, edges_normal)
     
-    # 3. More aggressive edge enhancement
-    # Modified kernel for stronger edge connectivity
+    # 3. More balanced edge enhancement
+    # Modified kernel back to cross shape for more selective edge connectivity
     cross_kernel = np.array([
+        [0, 1, 0],
         [1, 1, 1],
-        [1, 1, 1],
-        [1, 1, 1]
+        [0, 1, 0]
     ], dtype=np.uint8)
     
-    # Increased iterations for more aggressive dilation
-    edges_connected = cv2.dilate(edges_combined, cross_kernel, iterations=2)
-    
-    # 4. Create binary mask
-    binary = edges_connected > 0
+    # Back to single iteration for more controlled dilation
+    edges_connected = cv2.dilate(edges_combined, cross_kernel, iterations=1)
     
     # Rest of the function remains the same
+    binary = edges_connected > 0
+    
     num_labels, labels = cv2.connectedComponents(
         (1 - binary).astype(np.uint8),
         connectivity=8
