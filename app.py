@@ -218,6 +218,7 @@ def trace_shapes():
         return jsonify(result)
 
     except Exception as e:
+        print(f"Error in trace_shapes: {str(e)}")  # Basic error logging
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
