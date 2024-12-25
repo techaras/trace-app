@@ -54,52 +54,51 @@ def trace_shapes():
     return jsonify(response)
 
 def process_image(img):
-    """Process image to get edges and segmented regions with improved fine edge detection."""
+    """Process image to get edges and segmented regions with more aggressive edge detection."""
     # Store original image for final output
     original_img = img.copy()
     
     # 1. Convert to grayscale
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
-    # 2. Multi-scale edge detection approach
+    # 2. Multi-scale edge detection approach with more aggressive parameters
     edges_fine = None
     edges_normal = None
     
     # 2a. Fine detail edge detection
-    # Even lighter bilateral filter for finer details
-    bilateral_fine = cv2.bilateralFilter(gray, d=3, sigmaColor=10, sigmaSpace=10)  # Further reduced parameters
-    edges_fine = cv2.Canny(bilateral_fine, 10, 60)  # Even lower thresholds for finest edges
+    # Reduced bilateral filter parameters for even more detail preservation
+    bilateral_fine = cv2.bilateralFilter(gray, d=3, sigmaColor=5, sigmaSpace=5)  # Reduced sigmaColor and sigmaSpace
+    edges_fine = cv2.Canny(bilateral_fine, 5, 40)  # Lower thresholds for more edge detection
     
-    # 2b. Normal edge detection (kept for stability)
-    bilateral_normal = cv2.bilateralFilter(gray, d=5, sigmaColor=45, sigmaSpace=45)  # Slightly reduced
-    edges_normal = cv2.Canny(bilateral_normal, 20, 110)  # Lower thresholds while maintaining stability
+    # 2b. Normal edge detection
+    bilateral_normal = cv2.bilateralFilter(gray, d=5, sigmaColor=30, sigmaSpace=30)  # Reduced parameters
+    edges_normal = cv2.Canny(bilateral_normal, 15, 90)  # Lower thresholds
     
     # 2c. Combine edge detection results
     edges_combined = cv2.bitwise_or(edges_fine, edges_normal)
     
-    # 3. Careful edge enhancement
-    # Use a modified cross-shaped kernel for better detail preservation
+    # 3. More aggressive edge enhancement
+    # Modified kernel for stronger edge connectivity
     cross_kernel = np.array([
-        [0, 1, 0],
         [1, 1, 1],
-        [0, 1, 0]
+        [1, 1, 1],
+        [1, 1, 1]
     ], dtype=np.uint8)
     
-    edges_connected = cv2.dilate(edges_combined, cross_kernel, iterations=1)
+    # Increased iterations for more aggressive dilation
+    edges_connected = cv2.dilate(edges_combined, cross_kernel, iterations=2)
     
     # 4. Create binary mask
     binary = edges_connected > 0
     
-    # 5. Connected components labeling with 8-connectivity
+    # Rest of the function remains the same
     num_labels, labels = cv2.connectedComponents(
         (1 - binary).astype(np.uint8),
         connectivity=8
     )
     
-    # Create visualization
     segments = np.zeros_like(img)
     
-    # Generate colors with HSV for better distinction
     colors = []
     for i in range(num_labels):
         hue = int((i / num_labels) * 180)
