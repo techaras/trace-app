@@ -64,33 +64,31 @@ def process_image(img):
     # 2. Multi-scale edge detection approach
     edges_fine = None
     edges_normal = None
-
+    
     # 2a. Fine detail edge detection
     # Even lighter bilateral filter for finer details
-    bilateral_fine = cv2.bilateralFilter(gray, d=3, sigmaColor=5, sigmaSpace=5)  # Reduced sigma values for finer detail
-    edges_fine = cv2.Canny(bilateral_fine, 5, 50)  # Lower thresholds to catch more edges
+    bilateral_fine = cv2.bilateralFilter(gray, d=3, sigmaColor=10, sigmaSpace=10)  # Further reduced parameters
+    edges_fine = cv2.Canny(bilateral_fine, 10, 60)  # Even lower thresholds for finest edges
     
-    bilateral_normal = cv2.bilateralFilter(gray, d=5, sigmaColor=30, sigmaSpace=30)
-    edges_normal = cv2.Canny(bilateral_normal, 15, 90)
+    # 2b. Normal edge detection (kept for stability)
+    bilateral_normal = cv2.bilateralFilter(gray, d=5, sigmaColor=45, sigmaSpace=45)  # Slightly reduced
+    edges_normal = cv2.Canny(bilateral_normal, 20, 110)  # Lower thresholds while maintaining stability
     
-    # Combine edges with more weight on fine details
-    edges_combined = cv2.addWeighted(edges_fine, 0.7, edges_normal, 0.3, 0)
+    # 2c. Combine edge detection results
+    edges_combined = cv2.bitwise_or(edges_fine, edges_normal)
     
-    # 2. Use a thinner kernel for edge enhancement
-    thin_kernel = np.array([
+    # 3. Careful edge enhancement
+    # Use a modified cross-shaped kernel for better detail preservation
+    cross_kernel = np.array([
         [0, 1, 0],
         [1, 1, 1],
         [0, 1, 0]
     ], dtype=np.uint8)
     
-    # Careful dilation with reduced iteration
-    edges_connected = cv2.dilate(edges_combined, thin_kernel, iterations=1)
+    edges_connected = cv2.dilate(edges_combined, cross_kernel, iterations=1)
     
-    # Optional: Clean up small gaps
-    edges_connected = cv2.morphologyEx(edges_connected, cv2.MORPH_CLOSE, thin_kernel)
-    
-    # Create sharper binary mask
-    binary = edges_connected > 128  # More aggressive threshold
+    # 4. Create binary mask
+    binary = edges_connected > 0
     
     # 5. Connected components labeling with 8-connectivity
     num_labels, labels = cv2.connectedComponents(
